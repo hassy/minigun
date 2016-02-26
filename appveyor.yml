@@ -9,7 +9,10 @@ install:
   - npm install
 
 test_script:
+  - cmd: mv package.json package.json.bak
   - cmd: npm install artillery
+  - cmd: mv package.json.bak package.json
+  - cmd: npm test
 
 version: "{build}"
 build: off
