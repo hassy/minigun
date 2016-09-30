@@ -58,6 +58,11 @@ program
   .option('-q, --quiet', 'Do not print anything to stdout')
   .action(commands.dino);
 
+program
+  .command('cloud')
+  .description('Call in cloud artillery')
+  .action(commands.cloud);
+
 program.parse(process.argv);
 
 if (!process.argv.slice(2).length) {
