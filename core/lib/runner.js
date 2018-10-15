@@ -18,6 +18,7 @@ const createPhaser = require('./phases');
 const createReader = require('./readers');
 const engineUtil = require('./engine_util');
 const wl = require('./weighted-pick');
+const driftless = require('driftless');
 
 const Engines = {
   http: {},
@@ -197,7 +198,7 @@ function runner(script, payload, options, callback) {
     ee.run = function() {
       let runState = {
         pendingScenarios: 0,
-        pendingRequests: 0,
+        // pendingRequests: 0,
         compiledScenarios: null,
         scenarioEvents: null,
         picker: undefined,
@@ -248,6 +249,7 @@ function run(script, ee, options, runState) {
   let aggregate = [];
 
   let phaser = createPhaser(script.config.phases);
+
   phaser.on('arrival', function() {
     runScenario(script, intermediate, runState);
   });
@@ -260,14 +262,14 @@ function run(script, ee, options, runState) {
   phaser.on('done', function() {
     debug('All phases launched');
 
-    const doneYet = setInterval(function checkIfDone() {
+    const doneYet = driftless.setDriftlessInterval(function checkIfDone() {
       if (runState.pendingScenarios === 0) {
-        if (runState.pendingRequests !== 0) {
-          debug('DONE. Pending requests: %s', runState.pendingRequests);
-        }
+        // if (runState.pendingRequests !== 0) {
+        //   debug('DONE. Pending requests: %s', runState.pendingRequests);
+        // }
 
-        clearInterval(doneYet);
-        clearInterval(periodicStatsTimer);
+        driftless.clearDriftless(doneYet);
+        driftless.clearDriftless(periodicStatsTimer);
 
         sendStats();
 
@@ -276,23 +278,27 @@ function run(script, ee, options, runState) {
         let aggregateReport = Stats.combine(aggregate).report();
         return ee.emit('done', aggregateReport);
       } else {
-        debug('Pending requests: %s', runState.pendingRequests);
+        // debug('Pending requests: %s', runState.pendingRequests);
         debug('Pending scenarios: %s', runState.pendingScenarios);
       }
-    }, 500);
+    }, 250);
   });
 
-  const periodicStatsTimer = setInterval(sendStats, options.periodicStats * 1000);
-
   function sendStats() {
+    intermediate.stop(); // not expecting more in this time period
     aggregate.push(intermediate.clone());
-    intermediate._concurrency = runState.pendingScenarios;
-    intermediate._pendingRequests = runState.pendingRequests;
+    intermediate._concurrency = runState.pendingScenarios; // FIXME: not accurate measure of concurrency
+    // intermediate._pendingRequests = runState.pendingRequests;
     ee.emit('stats', intermediate.clone());
     intermediate.reset();
   }
 
+  intermediate.start(); // just before we start generating VUs
   phaser.run();
+
+  const periodicStatsTimer = driftless.setDriftlessInterval(
+    sendStats,
+    options.periodicStats * 1000);
 }
 
 function runScenario(script, intermediate, runState) {
@@ -302,6 +308,7 @@ function runScenario(script, intermediate, runState) {
   // Compile scenarios if needed
   //
   if (!runState.compiledScenarios) {
+    const startedAt = Date.now();
     _.each(script.scenarios, function(scenario) {
       if (!scenario.weight) {
         scenario.weight = 1;
@@ -317,24 +324,34 @@ function runScenario(script, intermediate, runState) {
     runState.scenarioEvents.on('histogram', function(name, value) {
       intermediate.addCustomStat(name, value);
     });
+    runState.scenarioEvents.on('meter', function(name) {
+      intermediate.meter(name);
+    });
     // TODO: Deprecate
     runState.scenarioEvents.on('customStat', function(stat) {
       intermediate.addCustomStat(stat.stat, stat.value);
     });
+
     runState.scenarioEvents.on('started', function() {
       runState.pendingScenarios++;
     });
     runState.scenarioEvents.on('error', function(errCode) {
       intermediate.addError(errCode);
     });
+
+    /*
     runState.scenarioEvents.on('request', function() {
       intermediate.newRequest();
 
-      runState.pendingRequests++;
+      // runState.pendingRequests++;
     });
+    */
+
     runState.scenarioEvents.on('match', function() {
       intermediate.addMatch();
     });
+
+    /*
     runState.scenarioEvents.on('response', function(delta, code, uid) {
       intermediate.completedRequest();
       intermediate.addLatency(delta);
@@ -343,8 +360,9 @@ function runScenario(script, intermediate, runState) {
       let entry = [Date.now(), uid, delta, code];
       intermediate.addEntry(entry);
 
-      runState.pendingRequests--;
+      // runState.pendingRequests--;
     });
+    */
 
     runState.compiledScenarios = _.map(
         script.scenarios,
@@ -354,7 +372,8 @@ function runScenario(script, intermediate, runState) {
           return engine.createScenario(scenarioSpec, runState.scenarioEvents);
         }
     );
-  }
+    console.log(Date.now() - startedAt, 'ms to compile');
+  } // compiling scenarios
 
   let i = runState.picker()[0];
 

@@ -115,10 +115,10 @@ WSEngine.prototype.compile = function (tasks, scenarioSpec, ee) {
     }
 
     initialContext._successCount = 0;
-    initialContext._pendingRequests = _.size(
-      _.reject(scenarioSpec, function(rs) {
-        return (typeof rs.think === 'number');
-      }));
+    // initialContext._pendingRequests = _.size(
+    //   _.reject(scenarioSpec, function(rs) {
+    //     return (typeof rs.think === 'number');
+    //   }));
 
     let steps = _.flatten([
       zero,

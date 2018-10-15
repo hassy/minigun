@@ -11,13 +11,11 @@ const request = require('request');
 const debug = require('debug')('http');
 const debugRequests = require('debug')('http:request');
 const debugResponse = require('debug')('http:response');
-const debugFullBody = require('debug')('http:full_body');
 const USER_AGENT = 'Artillery (https://artillery.io)';
 const engineUtil = require('./engine_util');
 const template = engineUtil.template;
 const http = require('http');
 const https = require('https');
-const fs = require('fs');
 const filtrex = require('filtrex');
 
 module.exports = HttpEngine;
@@ -440,7 +438,7 @@ HttpEngine.prototype.step = function step(requestSpec, ee, opts) {
         request(requestParams, maybeCallback)
           .on('request', function(req) {
             debugRequests("request start: %s", req.path);
-            ee.emit('request');
+            // ee.emit('request');
 
             const startedAt = process.hrtime();
 
@@ -449,7 +447,13 @@ HttpEngine.prototype.step = function step(requestSpec, ee, opts) {
               const endedAt = process.hrtime(startedAt);
               let delta = (endedAt[0] * 1e9) + endedAt[1];
               debugRequests("request end: %s", req.path);
-              ee.emit('response', delta, code, context._uid);
+              // ee.emit('response', delta, code, context._uid);
+
+              ee.emit('histogram', 'engine.http.response.time', delta / 1e6);
+              ee.emit('counter', `engine.http.code.${code}`, 1);
+              // completed requests
+              ee.emit('counter', 'engine.http.responses', 1);
+              ee.emit('meter', 'engine.http.avg-rps');
             });
           }).on('end', function() {
             context._successCount++;

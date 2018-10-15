@@ -24,6 +24,7 @@ function create() {
  * Combine several stats objects from different workers into one
  */
 function combine(statsObjects) {
+
   let result = create();
   L.each(statsObjects, function(stats) {
     L.each(stats._entries, function(entry) {
@@ -70,6 +71,12 @@ function combine(statsObjects) {
       }
       result._counters[name] += value;
     });
+    L.each(stats._meters, function(value, name) {
+      if (!result._meters[name]) {
+        result._meters[name] = 0;
+      }
+      result._meters[name] += value;
+    });
     L.each(stats._customStats, function(values, name) {
       if (!result._customStats[name]) {
         result._customStats[name] = [];
@@ -82,7 +89,11 @@ function combine(statsObjects) {
 
     result._concurrency += stats._concurrency || 0;
     result._pendingRequests += stats._pendingRequests;
+
   });
+
+  result._startedAt = L.min(L.map(statsObjects, '_startedAt'));
+  result._stoppedAt = L.max(L.map(statsObjects, '_stoppedAt'));
 
   return result;
 }
@@ -162,35 +173,37 @@ Stats.prototype.clone = function() {
 };
 
 Stats.prototype.report = function() {
+
   let result = {};
 
   result.timestamp = new Date().toISOString();
   result.scenariosCreated = this._generatedScenarios;
   result.scenariosCompleted = this._completedScenarios;
-  result.requestsCompleted = this._completedRequests;
 
-  let latencies = L.map(this._entries, (e) => {
-    return e[2];
-  });
+  // result.requestsCompleted = this._completedRequests;
 
-  result.latency = {
-    min: round(L.min(latencies) / 1e6, 1),
-    max: round(L.max(latencies) / 1e6, 1),
-    median: round(sl.median(latencies) / 1e6, 1),
-    p95: round(sl.percentile(latencies, 0.95) / 1e6, 1),
-    p99: round(sl.percentile(latencies, 0.99) / 1e6, 1)
-  };
+  // let latencies = L.map(this._entries, (e) => {
+  //   return e[2];
+  // });
 
-  let startedAt = L.min(this._requestTimestamps);
-  let now = Date.now();
-  let count = L.size(this._requestTimestamps);
-  let mean = Math.round(
-    (count / (Math.round((now - startedAt) / 10) / 100)) * 100) / 100;
+  // result.latency = {
+  //   min: round(L.min(latencies) / 1e6, 1),
+  //   max: round(L.max(latencies) / 1e6, 1),
+  //   median: round(sl.median(latencies) / 1e6, 1),
+  //   p95: round(sl.percentile(latencies, 0.95) / 1e6, 1),
+  //   p99: round(sl.percentile(latencies, 0.99) / 1e6, 1)
+  // };
 
-  result.rps = {
-    count: count,
-    mean: mean
-  };
+  // let startedAt = L.min(this._requestTimestamps);
+  // let now = Date.now();
+  // let count = L.size(this._requestTimestamps);
+  // let mean = Math.round(
+  //   (count / (Math.round((now - startedAt) / 10) / 100)) * 100) / 100;
+
+  // result.rps = {
+  //   count: count,
+  //   mean: mean
+  // };
 
   result.scenarioDuration = {
     min: round(L.min(this._scenarioLatencies) / 1e6, 1),
@@ -220,15 +233,31 @@ Stats.prototype.report = function() {
   });
   result.counters = this._counters;
 
+  result.meters = L.reduce(
+    this._meters,
+    (acc, value, name) => {
+      acc[name] = round(value / (this.getRecordingPeriod() / 1e3), 2);
+      return acc;
+    },
+    {});
+
   if (this._concurrency !== null) {
     result.concurrency = this._concurrency;
   }
   result.pendingRequests = this._pendingRequests;
 
+  result.startedAt = this._startedAt;
+  result.stoppedAt = this._stoppedAt;
+  result.reportingPeriodSec = round(this.getRecordingPeriod() / 1e3, 2);
   return result;
 };
 
+// TODO: Deprecate
 Stats.prototype.addCustomStat = function(name, n) {
+  const ts = Date.now();
+  this._startedAt = Math.min(this._startedAt, ts);
+  this._stoppedAt = Math.max(this._stoppedAt, ts);
+
   if (!this._customStats[name]) {
     this._customStats[name] = [];
   }
@@ -237,13 +266,34 @@ Stats.prototype.addCustomStat = function(name, n) {
   return this;
 };
 
+Stats.prototype.histogram = function(name, n) {
+  return this.addCustomStat(name, n);
+}
+
+// TODO: Measure the overhead automatic tracking at thousands of ops/sec.
 Stats.prototype.counter = function(name, value) {
+  const ts = Date.now();
+  this._startedAt = Math.min(this._startedAt, ts);
+  this._stoppedAt = Math.max(this._stoppedAt, ts);
+
   if (!this._counters[name]) {
     this._counters[name] = 0;
   }
   this._counters[name] += value;
   return this;
 };
+
+Stats.prototype.meter = function(name) {
+  const ts = Date.now();
+  this._startedAt = Math.min(this._startedAt, ts);
+  this._stoppedAt = Math.max(this._stoppedAt, ts);
+
+  if (!this._meters[name]) {
+    this._meters[name] = 0;
+  }
+  this._meters[name] += 1; // calculating average, don't need timestamps
+  return this;
+}
 
 Stats.prototype.reset = function() {
   this._entries = [];
@@ -258,10 +308,54 @@ Stats.prototype.reset = function() {
   this._matches = 0;
   this._customStats = {};
   this._counters = {};
+  this._meters = {};
   this._concurrency = null;
   this._pendingRequests = 0;
   this._scenarioCounter = {};
+  this._events = [];
+  this._startedAt = Date.now();
+  this._stoppedAt = -1;
   return this;
+};
+
+Stats.prototype.event = function(name, value, tags = null) {
+  if(!this._events[name]) {
+    this._events[name] = [];
+  }
+
+  this._events[name].push({ts: Date.now(), v: value, tags: tags});
+
+  return this;
+}
+
+Stats.prototype.aggregateEvent= function(name, type, startAt, endAt) {
+  const series = this._events[name];
+  const eventsInPeriod = series.filter((e) => {
+    return e.ts >= startAt && e.ts <= endAt;
+  });
+  if (type === 'c') {
+    return L.sum(L.map(eventsInPeriod, 'v'));
+  } else if (type === 'm') {
+
+  } else if (type === 'h') {
+
+  } else {
+    throw new Error('Unknown aggregation type');
+  }
+}
+
+Stats.prototype.start = function() {
+  this._startedAt = Date.now();
+  return this;
+}
+Stats.prototype.stop = function() {
+  this._stoppedAt = Date.now();
+  return this;
+}
+
+Stats.prototype.getRecordingPeriod = function() {
+  // TODO: May not have been stopped yet
+  return this._stoppedAt - this._startedAt;
 };
 
 Stats.prototype.free = function() {

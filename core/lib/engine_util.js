@@ -432,13 +432,14 @@ function parseSpec(spec, response) {
     if (isJSON(response)) {
       parser = parseJSON;
       extractor = extractJSONPath;
-      expr = spec.json;
+      expr = spec.json || '$';
     } else if (xmlCapture && isXML(response)) {
       parser = xmlCapture.parseXML;
       extractor = xmlCapture.extractXPath;
-      expr = spec.xpath;
+      expr = spec.xpath || '/';
     } else {
       // We really don't know what to do here.
+      console.error('Unkown capture type:', spec);
       parser = dummyParser;
       extractor = dummyExtractor;
       expr = '';
