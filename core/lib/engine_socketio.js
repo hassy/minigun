@@ -329,10 +329,10 @@ SocketIoEngine.prototype.compile = function (tasks, scenarioSpec, ee) {
   return function scenario(initialContext, callback) {
     initialContext._successCount = 0;
     initialContext._jar = request.jar();
-    initialContext._pendingRequests = _.size(
-        _.reject(scenarioSpec, function(rs) {
-          return (typeof rs.think === 'number');
-        }));
+    // initialContext._pendingRequests = _.size(
+    //     _.reject(scenarioSpec, function(rs) {
+    //       return (typeof rs.think === 'number');
+    //     }));
 
     let steps = _.flatten([
       function z(cb) {
