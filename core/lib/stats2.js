@@ -324,11 +324,10 @@ Stats.prototype.event = function(name, value, tags = null) {
   }
 
   this._events[name].push({ts: Date.now(), v: value, tags: tags});
-
   return this;
 }
 
-Stats.prototype.aggregateEvent= function(name, type, startAt, endAt) {
+Stats.prototype.aggregateEvent = function(name, type, startAt, endAt) {
   const series = this._events[name];
   const eventsInPeriod = series.filter((e) => {
     return e.ts >= startAt && e.ts <= endAt;
