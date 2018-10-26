@@ -22,12 +22,6 @@ module.exports = HttpEngine;
 
 function HttpEngine(script) {
   this.config = script.config;
-
-  if (script.config.http && script.config.http.pool) {
-    this.pool = {
-      maxSockets: Number(script.config.http.pool)
-    };
-  }
 }
 
 HttpEngine.prototype.createScenario = function(scenarioSpec, ee) {
@@ -292,14 +286,10 @@ HttpEngine.prototype.step = function step(requestSpec, ee, opts) {
 
         requestParams.url = url;
 
-        if (!self.pool) {
-          if ((/^https/i).test(requestParams.url)) {
-            requestParams.agent = context._httpsAgent;
-          } else {
-            requestParams.agent = context._httpAgent;
-          }
+        if ((/^https/i).test(requestParams.url)) {
+          requestParams.agent = context._httpsAgent;
         } else {
-          requestParams.pool = self.pool;
+          requestParams.agent = context._httpAgent;
         }
 
         function requestCallback(err, res, body) {
@@ -486,12 +476,13 @@ HttpEngine.prototype.compile = function compile(tasks, scenarioSpec, ee) {
     initialContext._successCount = 0;
 
     initialContext._jar = request.jar();
-    let keepAliveMsec = 1000;
-    let maxSockets = 1;
-    if (self.config.http && self.config.http.maxSockets) {
-      maxSockets = self.config.http.maxSockets;
-    }
-    if (!self.pool) {
+
+    const maxTotalSockets = _.get(self.config, 'http.pool');
+    const keepAliveMsec = 1000;
+    if (maxTotalSockets) {
+      self.pool = { keepAlive: true, keepAliveMsec: keepAliveMsec, maxSockets: maxTotalSockets, maxFreeSockets: maxTotalSockets };
+    } else {
+      let maxSockets = Number(_.get(self.config, 'http.maxSockets', 1))
       let agentOpts = {
         keepAlive: true,
         keepAliveMsecs: keepAliveMsec,
@@ -502,7 +493,6 @@ HttpEngine.prototype.compile = function compile(tasks, scenarioSpec, ee) {
       initialContext._httpAgent = new http.Agent(agentOpts);
       initialContext._httpsAgent = new https.Agent(agentOpts);
     }
-
 
     let steps = _.flatten([
       function zero(cb) {
