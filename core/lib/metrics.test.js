@@ -1,9 +1,9 @@
 'use strict';
 
-import test from 'ava';
-import { Metrics } from './metrics';
+const test = require('ava');
+const { Metrics } = require('./metrics');
+const createDebug = require('debug');
 
-import createDebug from 'debug';
 const debug = createDebug('test:metrics');
 
 const M = {
@@ -20,10 +20,10 @@ test('Basic tracking of a couple of metrics', async t => {
     aggregationLag: 2
   });
 
-  m.createTrackedMetric(M.requestCount, 'counter');
-  m.createTrackedMetric(M.code200, 'counter');
-  m.createTrackedMetric(M.responseTime, 'histogram');
-  m.createTrackedMetric(M.ops, 'meter');
+  m.describeMetric(M.requestCount, 'counter');
+  m.describeMetric(M.code200, 'counter');
+  m.describeMetric(M.responseTime, 'histogram');
+  m.describeMetric(M.ops, 'meter');
 
   m.counter(M.requestCount);
   m.counter(M.requestCount, 2);
@@ -75,12 +75,12 @@ test('Basic tracking of a couple of metrics', async t => {
 test('Continuous tracking of a couple of metrics', async t => {
   const m = new Metrics();
 
-  m.createTrackedMetrics([
+  m.describeMetrics([
     { name: M.requestCount, type: 'counter', displayName: 'Requests sent' },
     { name: M.responseTime, type: 'histogram', displayName: 'Response times' }
   ]);
-  m.createTrackedMetric(M.code200, 'counter');
-  m.createTrackedMetric(M.ops, 'meter');
+  m.describeMetrics(M.code200, 'counter');
+  m.describeMetric(M.ops, 'meter');
 
   m.events.on('aggregate', period => {
     debug(JSON.stringify(period, null, 4));
@@ -123,10 +123,10 @@ test('Continuous tracking of a couple of metrics', async t => {
   });
 });
 
-test('Watermark metrics', async (t) => {
-  const m = new Metrics();
+// test('Watermark metrics', async (t) => {
+//   const m = new Metrics();
 
-  m.createTrackedMetrics([
-    { name: M.concurrency, type: 'watermark', displayName: 'Concurrent requests' },
-  ]);
-});
+//   m.describeMetrics([
+//     { name: M.concurrency, type: 'watermark', displayName: 'Concurrent requests' },
+//   ]);
+// });

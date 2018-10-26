@@ -55,7 +55,12 @@ class Metrics {
   }
 
   // Options: counter, histogram, meter, watermark
-  createTrackedMetric(name, type) {
+  // The usage of describeMetric is optional (to provide a display name
+  // if needed). Tracking metrics that haven't been pre-declared will
+  // still work (in cases when we don't have the final list of metric names,
+  // e.g. when tracking error codes in an engine, or the occurence of
+  // HTTP response codes).
+  describeMetric(name, type) {
     let metricDefinitions = [];
     if (typeof name === 'object') {
       metricDefinitions = metricDefinitions.concat(name);
@@ -77,11 +82,15 @@ class Metrics {
     return this;
   }
 
-  createTrackedMetrics(list) {
-    return this.createTrackedMetric(list);
+  describeMetrics(list) {
+    return this.describeMetric(list);
   }
 
   event(name, value = 1, tags = {}) {
+    if (!this._events.hasOwnProperty(name)) {
+      this._events[name] = [];
+    }
+
     this._events[name].push({
       ts: Date.now(),
       v: value,
@@ -148,7 +157,7 @@ class Metrics {
       this._timers[name] = [].concat(this._timers[name]);
     }
 
-    if (stats.sats < stats.eats)
+    // if (stats.sats < stats.eats)
   }
 
   getEventType(name) {
@@ -204,10 +213,17 @@ class Metrics {
   }
 
   markStart(name, id) {
+    if (!this._timers.hasOwnProperty(name)) {
+      this._timers[name] = [];
+    }
     return this._timers[name].push([{ sat: Date.now(), id: id }]);
   }
 
   markEnd(name, id) {
+    if (!this._timers.hasOwnProperty(name)) {
+      this._timers[name] = [];
+    }
+
     return this._timers[name].push([{ eat: Date.now(), id: id }]);
   }
 
