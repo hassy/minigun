@@ -148,7 +148,7 @@ class Metrics {
       this._timers[name] = [].concat(this._timers[name]);
     }
 
-    if (stats.sats < stats.eats)
+    if (stats.sats < stats.eats) {}
   }
 
   getEventType(name) {
