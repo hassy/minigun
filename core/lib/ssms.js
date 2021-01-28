@@ -32,52 +32,78 @@ class SSMS extends EventEmitter {
     this._aggregatedRates = {};
   }
 
-  // Merge data for the same period collected in different places into one
   static mergePeriods(periodData) {
+    debug(`mergePeriods // timeslices: ${periodData.map(pd => pd.period)}`);
+
     // Returns result[timestamp] = {histograms:{},counters:{},rates:{}}
+    // ie. the result is indexed by timeslice
     const result = {
     };
 
     for (const pd of periodData) {
-      const ts = Object.keys(pd)[0];
+      const ts = pd.period;
 
       if (!result[ts]) {
         result[ts] = {
           counters: {},
-          histograms: {}
+          histograms: {},
+          rates: {}
         };
       }
 
-      pd[ts].counters = pd.counters || {};
-      pd[ts].histograms = pd.histograms || {};
-      pd[ts].rates = pd.rates || {};
+      pd.counters = pd.counters || {};
+      pd.histograms = pd.histograms || {};
+      pd.rates = pd.rates || {};
 
-      for(const [name, value] of Object.entries(pd[ts].counters)) {
+      //
+      // counters
+      //
+      for(const [name, value] of Object.entries(pd.counters)) {
         if (!result[ts].counters[name]) {
           result[ts].counters[name] = 0;
         }
         result[ts].counters[name] += value;
       }
 
-      for(const [name, value] of Object.entries(pd[ts].histograms)) {
+      //
+      // histograms
+      //
+      for(const [name, value] of Object.entries(pd.histograms)) {
         if (!result[ts].histograms[name]) {
-          result[ts].histograms[name] = value;
+          result[ts].histograms[name] = { _raw: value._raw };
         } else {
           // NOTE: this will throw if gamma (accuracy) parameters are different
           // in those two sketches
-          result[ts].histograms[name].merge(value);
+          result[ts].histograms[name]._raw.merge(value._raw);
         }
       }
+      Object.keys(result[ts].histograms).forEach((name) => {
+        const value = result[ts].histograms[name];
+        result[ts].histograms[name] = summarizeHistogram(value._raw);
+        result[ts].histograms[name]._raw = value._raw;
+      });
 
-      for(const [name, value] of Object.entries(pd[ts].rates)) {
+      //
+      // rates
+      //
+      for(const [name, value] of Object.entries(pd.rates)) {
         if(!result[ts].rates[name]) {
           result[ts].rates[name] = 0;
         }
         result[ts].rates[name] += value;
       }
-      for(const name of Object.keys(result[ts].rates)) {
+      for(const name of Object.keys(pd.rates)) {
         result[ts][name] = round(result[ts][name] / periodData.length, 1);
       }
+
+      result[ts].firstCounterAt = min([result[ts].firstCounterAt, pd.firstCounterAt]);
+      result[ts].firstHistogramAt = min([result[ts].firstHistogramAt, pd.firstHistogramAt]);
+      result[ts].lastCounterAt = max([result[ts].lastCounterAt, pd.lastCounterAt]);
+      result[ts].lastHistogramAt = max([result[ts].firstHistogramAt, pd.lastHistogramAt]);
+
+      result[ts].firstMetricAt = min([result[ts].firstHistogramAt, result[ts].firstCounterAt]);
+      result[ts].lastMetricAt = max([result[ts].lastHistogramAt, result[ts].lastCounterAt]);
+      result[ts].period = ts;
     }
 
     return result;
@@ -134,13 +160,15 @@ class SSMS extends EventEmitter {
       result.rates[name] = round(result.rates[name] / periods.length, 0);
     }
 
-    result.firstCounterAt = Math.min(...periods.map(p => p.firstCounterAt));
-    result.firstHistogramAt = Math.min(...periods.map(p => p.firstHistogramAt));
-    result.lastCounterAt = Math.max(...periods.map(p => p.firstCounterAt));
-    result.lastHistogramAt = Math.max(...periods.map(p => p.firstHistogramAt));
-    result.firstMetricAt = Math.min(result.firstCounterAt, result.firstHistogramAt);
-    result.lastMetricAt = Math.max(result.lastCounterAt, result.lastHistogramAt);
-    result.period = Math.max(...periods.map(p => p.period));
+    result.firstCounterAt = min(periods.map(p => p.firxstCounterAt));
+    result.firstHistogramAt = min(periods.map(p => p.firstHistogramAt));
+    result.lastCounterAt = max(periods.map(p => p.firstCounterAt));
+    result.lastHistogramAt = max(periods.map(p => p.firstHistogramAt));
+
+    result.firstMetricAt = min([result.firstHistogramAt, result.firstCounterAt]);
+    result.lastMetricAt = max([result.lastHistogramAt, result.lastCounterAt]);
+
+    result.period = max(periods.map(p => p.period));
 
     return result;
   }
@@ -197,8 +225,8 @@ class SSMS extends EventEmitter {
     this.incr(name, val);
   }
 
-  incr(name, val) {
-    this._counters.push(Date.now(), name, val);
+  incr(name, val, t) {
+    this._counters.push(t || Date.now(), name, val);
   }
 
   // TODO: Deprecate
@@ -206,12 +234,12 @@ class SSMS extends EventEmitter {
     this.histogram(name, val);
   }
 
-  histogram(name, val) {
-    this._histograms.push(Date.now(), name, val);
+  histogram(name, val, t) {
+    this._histograms.push(t || Date.now(), name, val);
   }
 
-  rate(name) {
-    this._rates.push(Date.now(), name);
+  rate(name, t) {
+    this._rates.push(t || Date.now(), name);
   }
 
   getMetrics(period) {
@@ -247,8 +275,8 @@ class SSMS extends EventEmitter {
     result.lastCounterAt = this._counterLastMeasurementByPeriod[period];
     result.lastHistogramAt = this._histogramLastMeasurementByPeriod[period];
 
-    result.firstMetricAt = Math.min(result.firstHistogramAt, result.firstCounterAt);
-    result.lastMetricAt = Math.max(result.lastHistogramAt, result.lastCounterAt);
+    result.firstMetricAt = min([result.firstHistogramAt, result.firstCounterAt]);
+    result.lastMetricAt = max([result.lastHistogramAt, result.lastCounterAt]);
 
     // TODO: Include size of the window, for cases when it's not 10s
 
@@ -477,5 +505,18 @@ function isObject (x) {
   return typeof x === 'object' && x !== null
 }
 ////////////////////
+
+// Like Math.min and Math.max but take a list of values, and ignore
+// undefined's rather than returning NaN when a value is undefined.
+// Returns undefined if all arguments are undefined.
+function min(values) {
+  const m = Math.min(...(values.map(x => x)));
+  return m === Infinity ? undefined : m;
+}
+
+function max(values) {
+  const m = Math.max(...(values.map(x => x)));
+  return m === -Infinity ? undefined : m;
+}
 
 module.exports = { SSMS };
